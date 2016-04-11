@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/websocket"
-	"github.com/nicolas-nannoni/fingy-server/events"
+	"github.com/nicolas-nannoni/fingy-gateway/events"
 	"log"
 	"net/url"
 	"time"
@@ -31,10 +31,13 @@ type connection struct {
 }
 
 type fingyClient struct {
-	Send chan events.Event
+	Router      Router
+	sendChannel chan events.Event
+	DeviceId    string
+	ServiceId   string
 }
 
-func Run() {
+func connectLoop() {
 
 	for {
 		err := connectToFingy()
@@ -51,7 +54,7 @@ func Run() {
 
 func connectToFingy() (err error) {
 
-	u := url.URL{Scheme: "ws", Host: fingyServerHost, Path: fmt.Sprintf("/device/%s/socket", DeviceId)}
+	u := url.URL{Scheme: "ws", Host: fingyServerHost, Path: fmt.Sprintf("/service/%s/device/%s/socket", F.ServiceId, F.DeviceId)}
 
 	ws, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
@@ -79,12 +82,6 @@ func connectToFingy() (err error) {
 
 func (c *connection) sendEvent(evt *events.Event) (err error) {
 
-	evt.PrepareForSend()
-	err = evt.Verify()
-	if err != nil {
-		return err
-	}
-
 	msg, err := json.Marshal(evt)
 	if err != nil {
 		return fmt.Errorf("The event %s could not be serialized to JSON: %v", evt, err)
@@ -109,7 +106,7 @@ func (c *connection) sendLoop() {
 Loop:
 	for {
 		select {
-		case evt := <-F.Send:
+		case evt := <-F.sendChannel:
 			evt.Timestamp = time.Now()
 			c.sendEvent(&evt)
 		case _, ok := <-c.failed:
@@ -169,5 +166,5 @@ func dispatchReceivedMessage(msg []byte) {
 	}
 
 	log.Printf("Message parsed from Fingy %v", evt)
-	Router.Dispatch(&evt)
+	F.Router.Dispatch(&evt)
 }
