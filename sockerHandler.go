@@ -3,9 +3,9 @@ package fingy
 import (
 	"encoding/json"
 	"fmt"
+	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/websocket"
 	"github.com/nicolas-nannoni/fingy-gateway/events"
-	"log"
 	"net/url"
 	"time"
 )
@@ -45,8 +45,8 @@ func connectLoop() {
 			break
 		}
 
-		log.Printf("Error while connecting to Fingy: %s", err)
-		log.Printf("Retrying to connect to Fingy in %s...", retryInterval)
+		log.Errorf("Error while connecting to Fingy: %s", err)
+		log.Infof("Retrying to connect to Fingy in %s...", retryInterval)
 		time.Sleep(retryInterval)
 	}
 
@@ -68,7 +68,7 @@ func connectToFingy() (err error) {
 		failed: make(chan bool),
 	}
 
-	log.Printf("Connection with Fingy established!")
+	log.Infof("Connection with Fingy established!")
 
 	go conn.sendLoop()
 	go conn.readLoop()
@@ -86,7 +86,7 @@ func (c *connection) sendEvent(evt *events.Event) (err error) {
 	if err != nil {
 		return fmt.Errorf("The event %s could not be serialized to JSON: %v", evt, err)
 	}
-	log.Printf("Pushing message %s to send queue", msg)
+	log.Debugf("Pushing message %s to send queue", msg)
 	c.send <- msg
 
 	return
@@ -116,7 +116,7 @@ Loop:
 		}
 
 	}
-	log.Printf("Ended send loop")
+	log.Debugf("Ended send loop")
 }
 
 func (c *connection) writeLoop() {
@@ -128,12 +128,12 @@ Loop:
 				break Loop
 			}
 			if err := c.write(websocket.TextMessage, message); err != nil {
-				log.Fatalf("Error while sending message to connection %s", c)
+				log.Errorf("Error while sending message to connection %s", c)
 				return
 			}
 		}
 	}
-	log.Printf("Write loop closed %s", c)
+	log.Debugf("Write loop closed %s", c)
 	c.failed <- true
 }
 
@@ -145,19 +145,19 @@ func (c *connection) readLoop() {
 		_, message, err := c.ws.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway) {
-				log.Printf("Error in connection %s: %v", c, err)
+				log.Errorf("Error in connection %s: %v", c, err)
 			}
 			break
 		}
 		dispatchReceivedMessage(message)
 	}
-	log.Printf("Read loop closed %s", c)
+	log.Debugf("Read loop closed %s", c)
 	c.failed <- true
 }
 
 func dispatchReceivedMessage(msg []byte) {
 
-	log.Printf("Message received from Fingy %s", msg)
+	log.Debugf("Message received from Fingy %s", msg)
 	var evt events.Event
 	err := json.Unmarshal(msg, &evt)
 	if err != nil {
@@ -165,6 +165,6 @@ func dispatchReceivedMessage(msg []byte) {
 		return
 	}
 
-	log.Printf("Message parsed from Fingy %v", evt)
+	log.Debugf("Message parsed from Fingy %v", evt)
 	F.Router.Dispatch(&evt)
 }
