@@ -14,8 +14,7 @@ const (
 	// Time allowed to write a message to the peer.
 	writeWait = 10 * time.Second
 
-	maxMessageSize  = 512
-	fingyServerHost = "localhost:8080"
+	maxMessageSize = 512
 
 	retryInterval = 5 * time.Second
 
@@ -35,6 +34,7 @@ type fingyClient struct {
 	sendChannel chan events.Event
 	DeviceId    string
 	ServiceId   string
+	FingyHost   string
 }
 
 func connectLoop() {
@@ -54,7 +54,7 @@ func connectLoop() {
 
 func connectToFingy() (err error) {
 
-	u := url.URL{Scheme: "ws", Host: fingyServerHost, Path: fmt.Sprintf("/service/%s/device/%s/socket", F.ServiceId, F.DeviceId)}
+	u := url.URL{Scheme: "ws", Host: F.FingyHost, Path: fmt.Sprintf("/service/%s/device/%s/socket", F.ServiceId, F.DeviceId)}
 
 	ws, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
