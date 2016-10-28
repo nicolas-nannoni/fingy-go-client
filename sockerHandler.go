@@ -18,13 +18,16 @@ const (
 
 	retryInterval = 5 * time.Second
 
+	keepAliveInterval = 5 * time.Second
+
 	// Number of events that can be bufferred before being sent
 	eventBufferSize = 10
 )
 
 type connection struct {
-	ws   *websocket.Conn
-	send chan []byte
+	ws                      *websocket.Conn
+	lastSuccessfulKeepAlive time.Time
+	send                    chan []byte
 
 	failed chan bool
 }
@@ -73,10 +76,10 @@ func connectToFingy() (err error) {
 	go conn.sendLoop()
 	go conn.readLoop()
 	go conn.writeLoop()
+	go conn.keepAliveLoop()
 
 	// Block until failure
 	<-conn.failed
-	close(conn.failed)
 	return fmt.Errorf("Connection with Fingy lost")
 }
 
@@ -123,17 +126,22 @@ func (c *connection) writeLoop() {
 Loop:
 	for {
 		select {
+		case _, ok := <-c.failed:
+			if !ok {
+				break Loop
+			}
+
 		case message, ok := <-c.send:
 			if !ok {
 				break Loop
 			}
 			if err := c.write(websocket.TextMessage, message); err != nil {
-				log.Errorf("Error while sending message to connection %s", c)
+				log.Errorf("Error while sending message to connection: %s", err)
 				return
 			}
 		}
 	}
-	log.Debugf("Write loop closed %s", c)
+	log.Debugf("Write loop closed")
 	c.failed <- true
 }
 
@@ -145,14 +153,49 @@ func (c *connection) readLoop() {
 		_, message, err := c.ws.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway) {
-				log.Errorf("Error in connection %s: %v", c, err)
+				log.Errorf("Error in connection: %s", err)
 			}
 			break
 		}
 		dispatchReceivedMessage(message)
 	}
-	log.Debugf("Read loop closed %s", c)
+	log.Debugf("Read loop closed")
 	c.failed <- true
+}
+
+func (c *connection) pongHandler(appData string) error {
+
+	log.Debug("Received pong from Fingy!")
+	c.lastSuccessfulKeepAlive = time.Now()
+	return nil
+}
+
+func (c *connection) keepAliveLoop() {
+
+	defer func() {
+		log.Error("Keep alive ping set connection in fail mode")
+		c.failed <- true
+	}()
+
+	c.ws.SetPongHandler(c.pongHandler)
+	c.lastSuccessfulKeepAlive = time.Now()
+
+	for {
+		if c.lastSuccessfulKeepAlive.Add(writeWait).Before(time.Now()) {
+			log.Errorf("No keep alive pong received from Fingy in time: connection is stale")
+			c.failed <- true
+			return
+		}
+
+		if err := c.write(websocket.PingMessage, nil); err != nil {
+			log.Errorf("Error while sending keep alive Ping message to connection: %s", err)
+			c.failed <- true
+			return
+		}
+
+		log.Debug("Keep alive ping successfully sent")
+		time.Sleep(keepAliveInterval)
+	}
 }
 
 func dispatchReceivedMessage(msg []byte) {
